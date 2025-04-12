@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  mcap-player:
+    image: mcap-player
+    build: .
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./data:/data  # Папка с MCAP-файлами на хосте
+    environment:
+      - MCAP_FILE=/data/input.mcap  # Путь внутри контейнера
+    command: ["python", "/app/playback.py", "$${MCAP_FILE}"]  # Используем переменную
+    restart: unless-stopped
