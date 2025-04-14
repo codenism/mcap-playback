@@ -14,30 +14,29 @@ class FoxgloveServerWithCapabilities(FoxgloveServer):
         super().__init__(host, port, name)
         self._capabilities = []
         self._time_range = None
-        self._connections = set()  # Храним активные соединения
+        self._connections = set()
 
     def set_capabilities(self, capabilities: list):
         self._capabilities = capabilities
+        print(f"Set capabilities: {self._capabilities}")
 
     def set_time_range(self, start: int, end: int):
         self._time_range = (start, end)
+        print(f"Set time range: {start} to {end}")
 
     async def add_connection(self, connection):
-        """Добавляем новое соединение."""
         self._connections.add(connection)
-        print(f"Added connection: {connection}")
+        print(f"Added connection: {connection}, Total: {len(self._connections)}")
 
     async def remove_connection(self, connection):
-        """Удаляем соединение."""
         self._connections.discard(connection)
-        print(f"Removed connection: {connection}")
+        print(f"Removed connection: {connection}, Total: {len(self._connections)}")
 
     async def send_json_to_all(self, msg: dict):
-        """Отправляем JSON-сообщение всем активным клиентам."""
-        import json
-        for connection in list(self._connections):  # Копируем список, чтобы избежать ошибок при изменении
+        for connection in list(self._connections):
             try:
                 await connection.send(json.dumps(msg, separators=(",", ":")))
+                print(f"Sent JSON to {connection}: {msg}")
             except Exception as e:
                 print(f"Failed to send message to {connection}: {str(e)}")
                 await self.remove_connection(connection)
@@ -54,6 +53,7 @@ class FoxgloveServerWithCapabilities(FoxgloveServer):
                 }
             } if self._time_range else {}
         }
+        print(f"Sending serverInfo to client {client_id}: {info}")
         await self._send_json(client_id, info)
 
 async def main():
@@ -69,12 +69,12 @@ async def main():
             print(f"Client unsubscribed from channel {channel_id}")
 
         async def on_client_message(self, server: FoxgloveServer, message: dict):
+            print(f"Received client message: {message}")
             op = message.get("op")
             if op == "seek":
                 try:
                     self.seek_time = int(message.get("time"))
                     print(f"Received seek request to time: {self.seek_time}")
-                    # Отправляем статус через канал (если есть подписанные каналы)
                     if foxglove_channels:
                         first_channel = list(foxglove_channels.values())[0]
                         await server.send_message(
@@ -116,8 +116,6 @@ async def main():
                             "message": "Playback paused"
                         }).encode("utf-8")
                     )
-            else:
-                print(f"Received client message: {message}")
 
     mcap_file = "/data/input.mcap"
     if not os.path.exists(mcap_file):
@@ -165,11 +163,13 @@ async def main():
 
     async with FoxgloveServerWithCapabilities("0.0.0.0", 8765, "mcap-server") as server:
         if start_time is not None and end_time is not None:
-            server.set_capabilities(["time", "clientPublish"])
+            # Расширяем список capabilities
+            server.set_capabilities(["time", "clientPublish", "playbackControl", "play", "pause", "seek"])
             server.set_time_range(start_time, end_time)
-
         else:
-            print("Warning: Invalid time range, playback controls may not appear")
+            print("Warning: Invalid time range, using fallback")
+            server.set_capabilities(["time", "clientPublish", "playbackControl", "play", "pause", "seek"])
+            server.set_time_range(0, 1000000000)  # Тестовый диапазон
 
         listener = Listener()
         server.set_listener(listener)
@@ -217,13 +217,14 @@ async def main():
             first_channel = list(foxglove_channels.values())[0]
             await server.send_message(
                 first_channel,
-                start_time,
+                start_time or 0,
                 json.dumps({
                     "op": "status",
                     "level": "info",
-                    "message": "Server initialized with time range"
+                    "message": "Server initialized, ready for playback"
                 }).encode("utf-8")
             )
+            print("Sent initial status message to clients")
 
         if start_time and foxglove_channels:
             for channel_id, message in messages:
